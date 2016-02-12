@@ -10,7 +10,7 @@ module Reactive.Banana.Prim.Dependencies (
 import Control.Monad
 import Data.Functor
 import Data.Monoid
-import System.Mem.Weak
+--import System.Mem.Weak
 
 import qualified Reactive.Banana.Prim.Graph as Graph
 import           Reactive.Banana.Prim.Types

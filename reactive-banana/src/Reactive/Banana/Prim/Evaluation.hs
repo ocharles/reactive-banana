@@ -16,7 +16,7 @@ import           Data.Functor
 import           Data.Maybe
 import qualified Data.PQueue.Prio.Min               as Q
 import qualified Data.Vault.Lazy                    as Lazy
-import           System.Mem.Weak
+--import           System.Mem.Weak
 
 import qualified Reactive.Banana.Prim.OrderedBag as OB
 import           Reactive.Banana.Prim.Plumbing

@@ -13,7 +13,7 @@ import           Data.Hashable
 import           Data.Monoid
 import qualified Data.Vault.Lazy                    as Lazy
 import           System.IO.Unsafe
-import           System.Mem.Weak
+--import           System.Mem.Weak
 
 import Reactive.Banana.Prim.Graph            (Graph)
 import Reactive.Banana.Prim.OrderedBag as OB (OrderedBag, empty)

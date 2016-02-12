@@ -14,7 +14,7 @@ import qualified GHC.Base               as GHC
 import qualified GHC.IORef              as GHC
 import qualified GHC.STRef              as GHC
 import qualified GHC.Weak               as GHC
-import           System.Mem.Weak
+--import           System.Mem.Weak hiding (Weak)
 
 debug :: MonadIO m => String -> m ()
 -- debug = liftIO . putStrLn
@@ -46,15 +46,26 @@ put ~(Ref ref _) = liftIO . writeIORef ref
 modify' :: MonadIO m => Ref a -> (a -> a) -> m ()
 modify' ~(Ref ref _) f = liftIO $ readIORef ref >>= \x -> writeIORef ref $! f x
 
+newtype Weak a = Weak a
+
+deRefWeak :: Weak a -> IO (Maybe a)
+deRefWeak (Weak v) = return (Just v)
+
+finalize :: Weak a -> IO ()
+finalize _ = return ()
+
 {-----------------------------------------------------------------------------
     Weak pointers
 ------------------------------------------------------------------------------}
+-- mkWeakIORefValueFinalizer :: IORef a -> value -> IO () -> IO (Weak value)
+-- mkWeakIORefValueFinalizer r@(GHC.IORef (GHC.STRef r#)) v f = GHC.IO $ \s ->
+--   case GHC.mkWeak# r# v f s of (# s1, w #) -> (# s1, GHC.Weak w #)
+
 mkWeakIORefValueFinalizer :: IORef a -> value -> IO () -> IO (Weak value)
-mkWeakIORefValueFinalizer r@(GHC.IORef (GHC.STRef r#)) v f = GHC.IO $ \s ->
-  case GHC.mkWeak# r# v f s of (# s1, w #) -> (# s1, GHC.Weak w #)
+mkWeakIORefValueFinalizer r@(GHC.IORef (GHC.STRef r#)) v f = return (Weak v)
 
 mkWeakIORefValue :: IORef a -> value -> IO (Weak value)
-mkWeakIORefValue a b = mkWeakIORefValueFinalizer a b (return ())
+mkWeakIORefValue a b = mkWeakIORefValueFinalizer a b (putStrLn "Nom")
 
 mkWeakRefValue :: MonadIO m => Ref a -> value -> m (Weak value)
 mkWeakRefValue (Ref ref _) v = liftIO $ mkWeakIORefValue ref v
