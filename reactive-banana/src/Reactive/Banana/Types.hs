@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 {-----------------------------------------------------------------------------
     reactive-banana
 ------------------------------------------------------------------------------}
@@ -32,6 +34,7 @@ no two event occurrences may happen at the same time.
 <<doc/frp-event.png>>
 -}
 newtype Event a = E { unE :: Prim.Event a }
+
 -- Invariant: The empty list `[]` never occurs as event value.
 
 -- | The function 'fmap' applies a function @f@ to every value.
@@ -41,7 +44,7 @@ newtype Event a = E { unE :: Prim.Event a }
 -- > fmap f e = [(time, f a) | (time, a) <- e]
 instance Functor Event where
     fmap f = E . Prim.mapE f . unE
-
+    {-# INLINE fmap #-}
 
 {-| @Behavior a@ represents a value that varies in time.
 Semantically, you can think of it as a function
@@ -63,7 +66,10 @@ newtype Behavior a = B { unB :: Prim.Behavior a }
 -- > fx <*> bx = \time -> fx time $ bx time
 instance Applicative Behavior where
     pure x    = B $ Prim.pureB x
+    {-# INLINE pure #-}
+
     bf <*> bx = B $ Prim.applyB (unB bf) (unB bx)
+    {-# INLINE (<*>) #-}
 
 -- | The function 'fmap' applies a function @f@ at every point in time.
 -- Semantically,
@@ -72,6 +78,7 @@ instance Applicative Behavior where
 -- > fmap f b = \time -> f (b time)
 instance Functor Behavior where
     fmap = liftA
+    {-# INLINE fmap #-}
 
 
 -- | The 'Future' monad is just a helper type for the 'changes' function.
@@ -79,17 +86,7 @@ instance Functor Behavior where
 -- A value of type @Future a@ is only available in the context
 -- of a 'reactimate' but not during event processing.
 newtype Future a = F { unF :: Prim.Future a }
-
--- boilerplate class instances
-instance Functor Future where fmap f = F . fmap f . unF
-
-instance Monad Future where
-    return  = F . return
-    m >>= g = F $ unF m >>= unF . g
-
-instance Applicative Future where
-    pure    = F . pure
-    f <*> a = F $ unF f <*> unF a
+  deriving (Functor, Applicative, Monad)
 
 
 {-| The 'Moment' monad denotes a /pure/ computation that happens
@@ -108,13 +105,13 @@ We use the fiction that every calculation within the 'Moment'
 monad takes zero /logical time/ to perform.
 -}
 newtype Moment a = M { unM :: Prim.Moment a }
+  deriving (Functor, Applicative, Monad, MonadIO, MonadFix)
 
 {-| The 'MomentIO' monad is used to add inputs and outputs
 to an event network.
 -}
 newtype MomentIO a = MIO { unMIO :: Prim.Moment a }
-
-instance MonadIO MomentIO where liftIO = MIO . liftIO
+  deriving (Functor, Applicative, Monad, MonadIO, MonadFix)
 
 {-| An instance of the 'MonadMoment' class denotes a computation
 that happens at one particular moment in time.
@@ -123,24 +120,10 @@ Unlike the 'Moment' monad, it need not be pure anymore.
 class Monad m => MonadMoment m where
     liftMoment :: Moment a -> m a
 
-instance MonadMoment Moment   where liftMoment = id
-instance MonadMoment MomentIO where liftMoment = MIO . unM
+instance MonadMoment Moment   where
+  liftMoment = id
+  {-# INLINE liftMoment #-}
 
--- boilerplate class instances
-instance Functor Moment where fmap f = M . fmap f . unM
-instance Monad Moment where
-    return  = M . return
-    m >>= g = M $ unM m >>= unM . g
-instance Applicative Moment where
-    pure    = M . pure
-    f <*> a = M $ unM f <*> unM a
-instance MonadFix Moment where mfix f = M $ mfix (unM . f)
-
-instance Functor MomentIO where fmap f = MIO . fmap f . unMIO
-instance Monad MomentIO where
-    return  = MIO . return
-    m >>= g = MIO $ unMIO m >>= unMIO . g
-instance Applicative MomentIO where
-    pure    = MIO . pure
-    f <*> a = MIO $ unMIO f <*> unMIO a
-instance MonadFix MomentIO where mfix f = MIO $ mfix (unMIO . f)
+instance MonadMoment MomentIO where
+  liftMoment = MIO . unM
+  {-# INLINE liftMoment #-}
