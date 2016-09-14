@@ -46,10 +46,12 @@ cache m = unsafePerformIO $ do
 -- | Return a pure value. Doesn't make use of the cache.
 fromPure :: Monad m => a -> Cached m a
 fromPure = Cached . return
+{-# INLINE fromPure #-}
 
 -- | Lift an action that is /not/ cached, for instance because it is idempotent.
 don'tCache :: Monad m => m a -> Cached m a
 don'tCache = Cached
+{-# INLINE don'tCache #-}
 
 liftCached1 :: (MonadFix m, MonadIO m) =>
     (a -> m b) -> Cached m a -> Cached m b
