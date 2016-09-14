@@ -19,76 +19,110 @@ import Data.Monoid
 {-----------------------------------------------------------------------------
     Type and class instances
 ------------------------------------------------------------------------------}
-newtype ReaderWriterIOT r w m a = ReaderWriterIOT { run :: r -> IORef w -> m a }
+newtype ReaderWriterIOT r w a = ReaderWriterIOT { run :: r -> IORef w -> IO a }
 
-instance Functor m => Functor (ReaderWriterIOT r w m)   where fmap = fmapR
+instance Functor (ReaderWriterIOT r w) where
+  fmap = fmapR
+  {-# INLINE fmap #-}
 
-instance Applicative m => Applicative (ReaderWriterIOT r w m) where
-    pure  = pureR
-    (<*>) = apR
-    
-instance Monad m => Monad (ReaderWriterIOT r w m) where
-    return = returnR
-    (>>=)  = bindR
+instance Applicative (ReaderWriterIOT r w) where
+  pure = pureR
+  {-# INLINE pure #-}
+  (<*>) = apR
+  {-# INLINE (<*>) #-}
 
-instance MonadFix m => MonadFix (ReaderWriterIOT r w m) where mfix = mfixR
-instance MonadIO m => MonadIO (ReaderWriterIOT r w m)   where liftIO = liftIOR
-instance MonadTrans (ReaderWriterIOT r w)               where lift = liftR
+instance Monad (ReaderWriterIOT r w) where
+  return = returnR
+  {-# INLINE return #-}
+  (>>=) = bindR
+  {-# INLINE (>>=) #-}
 
-instance (Monad m, a ~ ()) => Monoid (ReaderWriterIOT r w m a) where
-    mempty          = return ()
-    mx `mappend` my = mx >> my
+instance MonadFix (ReaderWriterIOT r w) where
+  mfix = mfixR
+  {-# INLINE mfix #-}
+
+instance MonadIO (ReaderWriterIOT r w) where
+  liftIO = liftIOR
+  {-# INLINE liftIO #-}
+
+instance (a ~ ()) =>
+         Monoid (ReaderWriterIOT r w a) where
+  mempty = return ()
+  {-# INLINE mempty #-}
+  mx `mappend` my = mx >> my
+  {-# INLINE mappend #-}
 
 {-----------------------------------------------------------------------------
     Functions
 ------------------------------------------------------------------------------}
 liftIOR m = ReaderWriterIOT $ \x y -> liftIO m
+{-# INLINE liftIOR #-}
 
 liftR m = ReaderWriterIOT $ \x y -> m
+{-# INLINE liftR #-}
 
 fmapR f m = ReaderWriterIOT $ \x y -> fmap f (run m x y)
+{-# INLINE fmapR #-}
 
 returnR a = ReaderWriterIOT $ \_ _ -> return a
+{-# INLINE returnR #-}
 
 bindR m k = ReaderWriterIOT $ \x y -> run m x y >>= \a -> run (k a) x y
+{-# INLINE bindR #-}
 
 mfixR f = ReaderWriterIOT $ \x y -> mfix (\a -> run (f a) x y)
+{-# INLINE mfixR #-}
 
 pureR a = ReaderWriterIOT $ \_ _ -> pure a
+{-# INLINE pureR #-}
 
 apR f a = ReaderWriterIOT $ \x y -> run f x y <*> run a x y
+{-# INLINE apR #-}
 
-readerWriterIOT :: (MonadIO m, Monoid w) =>
-    (r -> IO (a, w)) -> ReaderWriterIOT r w m a
+readerWriterIOT :: (Monoid w) =>
+    (r -> IO (a, w)) -> ReaderWriterIOT r w a
 readerWriterIOT f = do
     r <- ask
     (a,w) <- liftIOR $ f r
     tell w
     return a
+{-# INLINE readerWriterIOT #-}
 
-runReaderWriterIOT :: (MonadIO m, Monoid w) => ReaderWriterIOT r w m a -> r -> m (a,w)
+runReaderWriterIOT
+  :: (Monoid w)
+  => ReaderWriterIOT r w a -> r -> IO (a, w)
 runReaderWriterIOT m r = do
-    ref <- liftIO $ newIORef mempty
-    a   <- run m r ref
-    w   <- liftIO $ readIORef ref
-    return (a,w)
+  ref <- newIORef mempty
+  a <- run m r ref
+  w <- readIORef ref
+  return (a, w)
+{-# INLINE runReaderWriterIOT #-}
 
-tell :: (MonadIO m, Monoid w) => w -> ReaderWriterIOT r w m ()
-tell w = ReaderWriterIOT $ \_ ref -> liftIO $ modifyIORef ref (`mappend` w)
+tell
+  :: (Monoid w)
+  => w -> ReaderWriterIOT r w ()
+tell w = ReaderWriterIOT $ \_ ref -> modifyIORef ref (`mappend` w)
+{-# INLINE tell #-}
 
-listen :: (MonadIO m, Monoid w) => ReaderWriterIOT r w m a -> ReaderWriterIOT r w m (a, w)
-listen m = ReaderWriterIOT $ \r ref -> do
+listen
+  :: (Monoid w)
+  => ReaderWriterIOT r w a -> ReaderWriterIOT r w (a, w)
+listen m =
+  ReaderWriterIOT $ \r ref -> do
     a <- run m r ref
-    w <- liftIO $ readIORef ref
-    return (a,w)
+    w <- readIORef ref
+    return (a, w)
+{-# INLINE listen #-}
 
-local :: MonadIO m => (r -> r) -> ReaderWriterIOT r w m a -> ReaderWriterIOT r w m a
+local :: (r -> r) -> ReaderWriterIOT r w a -> ReaderWriterIOT r w a
 local f m = ReaderWriterIOT $ \r ref -> run m (f r) ref
+{-# INLINE local #-}
 
-ask :: Monad m => ReaderWriterIOT r w m r
+ask :: ReaderWriterIOT r w r
 ask = ReaderWriterIOT $ \r _ -> return r
+{-# INLINE ask #-}
 
-test :: ReaderWriterIOT String String IO ()
+test :: ReaderWriterIOT String String ()
 test = do
     c <- ask
     tell c

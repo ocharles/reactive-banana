@@ -39,7 +39,7 @@ emptyNetwork = Network
     , nAlwaysP = Nothing
     }
 
-type Build  = ReaderWriterIOT BuildR BuildW IO
+type Build  = ReaderWriterIOT BuildR BuildW
 type BuildR = (Time, Pulse ())
     -- ( current time
     -- , pulse that always fires)
@@ -157,7 +157,7 @@ type EvalP    = RWSIOT BuildR (EvalPW,BuildW) Lazy.Vault IO
     -- state  : current pulse values
 
 -- Computation with a timestamp that indicates the last time it was performed.
-type EvalL    = ReaderWriterIOT () Time IO
+type EvalL    = ReaderWriterIOT () Time
 
 {-----------------------------------------------------------------------------
     Show functions for debugging
