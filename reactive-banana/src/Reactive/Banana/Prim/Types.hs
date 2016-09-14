@@ -152,7 +152,7 @@ type Future   = IO
 
 -- Note: For efficiency reasons, we unroll the monad transformer stack.
 -- type EvalP = RWST () Lazy.Vault EvalPW Build
-type EvalP    = RWSIOT BuildR (EvalPW,BuildW) Lazy.Vault IO
+type EvalP    = RWSIOT BuildR (EvalPW,BuildW) Lazy.Vault
     -- writer : (latch updates, IO action)
     -- state  : current pulse values
 
