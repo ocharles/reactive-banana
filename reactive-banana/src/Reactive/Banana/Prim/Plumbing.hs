@@ -126,6 +126,7 @@ addOutput p = do
         }
     (P p) `addChild` (O o)
     RW.tell $ BuildW (mempty, [o], mempty, mempty)
+{-# INLINE addOutput #-}
 
 {-----------------------------------------------------------------------------
     Build monad
@@ -145,9 +146,11 @@ runBuildIO i m = {-# SCC runBuild #-} do
             Just m  -> snd <$> unfold w' m
             Nothing -> return w'
         return (a,w'')
+{-# INLINE runBuildIO #-}
 
 buildLater :: Build () -> Build ()
 buildLater x = RW.tell $ BuildW (mempty, mempty, mempty, Just x)
+{-# INLINE buildLater #-}
 
 -- | Pretend to return a value right now,
 -- but do not actually calculate it until later.
@@ -161,35 +164,45 @@ buildLaterReadNow m = do
         error "buildLaterReadNow: Trying to read before it is written."
     buildLater $ m >>= liftIO . writeIORef ref
     liftIO $ unsafeInterleaveIO $ readIORef ref
+{-# INLINE buildLaterReadNow #-}
 
 liftBuild :: Build a -> BuildIO a
 liftBuild = id
+{-# INLINE liftBuild #-}
 
 getTimeB :: Build Time
 getTimeB = (\(x,_) -> x) <$> RW.ask
+{-# INLINE getTimeB #-}
 
 alwaysP :: Build (Pulse ())
 alwaysP = (\(_,x) -> x) <$> RW.ask
+{-# INLINE alwaysP #-}
 
 readLatchB :: Latch a -> Build a
 readLatchB = liftIO . readLatchIO
+{-# INLINE readLatchB #-}
 
 dependOn :: Pulse child -> Pulse parent -> Build ()
 dependOn child parent = (P parent) `addChild` (P child)
+{-# INLINE dependOn #-}
 
 keepAlive :: Pulse child -> Pulse parent -> Build ()
 keepAlive child parent = liftIO $ mkWeakRefValue child parent >> return ()
+{-# INLINE keepAlive #-}
 
 addChild :: SomeNode -> SomeNode -> Build ()
 addChild parent child =
     RW.tell $ BuildW (Deps.addChild parent child, mempty, mempty, mempty)
+{-# INLINE addChild #-}
 
 changeParent :: Pulse child -> Pulse parent -> Build ()
 changeParent node parent =
     RW.tell $ BuildW (Deps.changeParent node parent, mempty, mempty, mempty)
+{-# INLINE changeParent #-}
 
 liftIOLater :: IO () -> Build ()
 liftIOLater x = RW.tell $ BuildW (mempty, mempty, Action x, mempty)
+{-# INLINE liftIOLater #-}
 
 {-----------------------------------------------------------------------------
     EvalL monad
@@ -200,11 +213,13 @@ readLatchIO :: Latch a -> IO a
 readLatchIO latch = do
     Latch{..} <- readRef latch
     liftIO $ fst <$> RW.runReaderWriterIOT _evalL ()
+{-# INLINE readLatchIO #-}
 
 getValueL :: Latch a -> EvalL a
 getValueL latch = do
     Latch{..} <- readRef latch
     _evalL
+{-# INLINE getValueL #-}
 
 {-----------------------------------------------------------------------------
     EvalP monad
@@ -213,6 +228,7 @@ runEvalP :: Lazy.Vault -> EvalP a -> Build (a, EvalPW)
 runEvalP s1 m = RW.readerWriterIOT $ \r2 -> do
     (a,_,(w1,w2)) <- RWS.runRWSIOT m r2 s1
     return ((a,w1), w2)
+{-# INLINE runEvalP #-}
 
 liftBuildP :: Build a -> EvalP a
 liftBuildP m = RWS.rwsT $ \r2 s -> do
@@ -221,29 +237,38 @@ liftBuildP m = RWS.rwsT $ \r2 s -> do
 
 askTime :: EvalP Time
 askTime = fst <$> RWS.ask
+{-# INLINE askTime #-}
 
 readPulseP :: Pulse a -> EvalP (Maybe a)
 readPulseP p = do
     Pulse{..} <- readRef p
     join . Lazy.lookup _keyP <$> RWS.get
+{-# INLINE readPulseP #-}
 
 writePulseP :: Lazy.Key (Maybe a) -> Maybe a -> EvalP ()
 writePulseP key a = do
     s <- RWS.get
     RWS.put $ Lazy.insert key a s
+{-# INLINE writePulseP #-}
 
 readLatchP :: Latch a -> EvalP a
 readLatchP = liftBuildP . readLatchB
+{-# INLINE readLatchP #-}
 
 readLatchFutureP :: Latch a -> EvalP (Future a)
 readLatchFutureP = return . readLatchIO
+{-# INLINE readLatchFutureP #-}
 
 rememberLatchUpdate :: IO () -> EvalP ()
 rememberLatchUpdate x = RWS.tell ((Action x,mempty),mempty)
+{-# INLINE rememberLatchUpdate #-}
 
 rememberOutput :: (Output, EvalO) -> EvalP ()
 rememberOutput x = RWS.tell ((mempty,[x]),mempty)
+{-# INLINE rememberOutput #-}
 
 -- worker wrapper to break sharing and support better inlining
 unwrapEvalP r m = RWS.run m r
+{-# INLINE unwrapEvalP #-}
 wrapEvalP   m   = RWS.R m
+{-# INLINE wrapEvalP #-}
