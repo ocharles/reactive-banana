@@ -5,7 +5,7 @@ module Control.Monad.Trans.ReaderWriterIO (
     -- using an 'IORef' for the writer.
     
     -- * Documentation
-    ReaderWriterIOT, readerWriterIOT, runReaderWriterIOT, tell, listen, ask, local,
+    ReaderWriterIOT(..), readerWriterIOT, runReaderWriterIOT, tell, listen, ask, local,
     ) where
 
 import Control.Applicative

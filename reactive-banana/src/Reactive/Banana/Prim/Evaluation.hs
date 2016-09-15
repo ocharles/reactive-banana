@@ -10,12 +10,11 @@ import qualified Control.Exception                  as Strict (evaluate)
 import           Control.Monad                                (foldM)
 import           Control.Monad                                (join)
 import           Control.Monad.IO.Class
-import qualified Control.Monad.Trans.RWSIO          as RWS
 import qualified Control.Monad.Trans.ReaderWriterIO as RW
 import           Data.Functor
+import           Data.IORef
 import           Data.Maybe
 import qualified Data.PQueue.Prio.Min               as Q
-import qualified Data.Vault.Lazy                    as Lazy
 import           System.Mem.Weak
 
 import qualified Reactive.Banana.Prim.OrderedBag as OB
@@ -31,7 +30,7 @@ type Queue = Q.MinPQueue Level
 -- | Evaluate all the pulses in the graph,
 -- Rebuild the graph as necessary and update the latch values.
 step :: Inputs -> Step
-step (inputs,pulses)
+step inputs
         Network{ nTime = time1
         , nOutputs = outputs1
         , nAlwaysP = Just alwaysP   -- we assume that this has been built already
@@ -41,7 +40,7 @@ step (inputs,pulses)
     -- evaluate pulses
     ((_, (latchUpdates, outputs)), topologyUpdates, os)
             <- runBuildIO (time1, alwaysP)
-            $  runEvalP pulses
+            $  runEvalP
             $  evaluatePulses inputs
 
     doit latchUpdates                           -- update latch values from pulses
@@ -62,28 +61,32 @@ runEvalOs = sequence_ . map join
 ------------------------------------------------------------------------------}
 -- | Update all pulses in the graph, starting from a given set of nodes
 evaluatePulses :: [SomeNode] -> EvalP ()
-evaluatePulses roots = wrapEvalP $ \r -> go r =<< insertNodes r roots Q.empty
+evaluatePulses roots = do
+  fin <- liftIO $ newIORef (return ())
+  wrapEvalP $ \r@(time, _) w -> go fin r w =<< insertNodes time roots Q.empty
+  liftIO $ join (readIORef fin)
     where
     -- go :: Queue SomeNode -> EvalP ()
-    go r q = {-# SCC go #-}
+    go fin r@(time,_) w q = {-# SCC go #-}
         case ({-# SCC minView #-} Q.minView q) of
             Nothing         -> return ()
             Just (node, q)  -> do
-                children <- unwrapEvalP r (evaluateNode node)
-                q        <- insertNodes r children q
-                go r q
+                children <- unwrapEvalP r w (evaluateNode fin node)
+                q        <- insertNodes time children q
+                go fin r w q
 
 -- | Recalculate a given node and return all children nodes
 -- that need to evaluated subsequently.
-evaluateNode :: SomeNode -> EvalP [SomeNode]
-evaluateNode (P p) = {-# SCC evaluateNodeP #-} do
+evaluateNode :: IORef (IO ()) -> SomeNode -> EvalP [SomeNode]
+evaluateNode cleanup (P p) = {-# SCC evaluateNodeP #-} do
     Pulse{..} <- readRef p
     ma        <- runPulseFunction _evalP
-    writePulseP _keyP ma
+    writePulseP _valueP ma
+    liftIO $ modifyIORef cleanup (writeIORef _valueP Nothing >>)
     case ma of
         Nothing -> return []
         Just _  -> liftIO $ deRefWeaks _childrenP
-evaluateNode (L lw) = {-# SCC evaluateNodeL #-} do
+evaluateNode _ (L lw) = {-# SCC evaluateNodeL #-} do
     time           <- askTime
     LatchWrite{..} <- readRef lw
     mlatch         <- liftIO $ deRefWeak _latchLW -- retrieve destination latch
@@ -96,7 +99,7 @@ evaluateNode (L lw) = {-# SCC evaluateNodeL #-} do
                 modify' latch $ \l ->
                     a `seq` l { _seenL = time, _valueL = a }
     return []
-evaluateNode (O o) = {-# SCC evaluateNodeO #-} do
+evaluateNode _ (O o) = {-# SCC evaluateNodeO #-} do
     debug "evaluateNode O"
     Output{..} <- readRef o
     m          <- _evalO                    -- calculate output action
@@ -139,7 +142,7 @@ runPulseFunction (PulseRead p) = readPulseP p
 
 -- | Insert nodes into the queue
 -- insertNode :: [SomeNode] -> Queue SomeNode -> EvalP (Queue SomeNode)
-insertNodes (RWS.Tuple (time,_) _ _) = {-# SCC insertNodes #-} go
+insertNodes time = {-# SCC insertNodes #-} go
     where
     go []              q = return q
     go (node@(P p):xs) q = do

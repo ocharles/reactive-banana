@@ -7,7 +7,6 @@ module Reactive.Banana.Prim.IO where
 import           Control.Monad.IO.Class
 import           Data.Functor
 import           Data.IORef
-import qualified Data.Vault.Lazy        as Lazy
 
 import Reactive.Banana.Prim.Combinators (mapP)
 import Reactive.Banana.Prim.Evaluation  (step)
@@ -27,9 +26,9 @@ debug s = id
 newInput :: Build (Pulse a, a -> Step)
 newInput = mdo
     always <- alwaysP
-    key    <- liftIO $ Lazy.newKey
+    value <- liftIO (newIORef Nothing)
     pulse  <- liftIO $ newRef $ Pulse
-        { _keyP      = key
+        { _valueP    = value
         , _seenP     = agesAgo
         , _evalP     = PulseRead pulse    -- get its own value
         , _childrenP = []
@@ -38,7 +37,12 @@ newInput = mdo
         , _nameP     = "newInput"
         }
     -- Also add the  alwaysP  pulse to the inputs.
-    let run a = step ([P pulse, P always], Lazy.insert key (Just a) Lazy.empty)
+    let run a n = do
+          liftIO (writeIORef value (Just a))
+          s <- step [P pulse, P always] n
+          liftIO (writeIORef value Nothing)
+          return s
+
     return (pulse, run)
 
 -- | Register a handler to be executed whenever a pulse occurs.

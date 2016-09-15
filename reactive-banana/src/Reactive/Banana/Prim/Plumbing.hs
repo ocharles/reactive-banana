@@ -7,7 +7,6 @@ module Reactive.Banana.Prim.Plumbing where
 import           Control.Monad                                (join)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
-import qualified Control.Monad.Trans.RWSIO          as RWS
 import qualified Control.Monad.Trans.Reader         as Reader
 import qualified Control.Monad.Trans.ReaderWriterIO as RW
 import           Data.Function                                (on)
@@ -15,7 +14,6 @@ import           Data.Functor
 import           Data.IORef
 import           Data.List                                    (sortBy)
 import           Data.Monoid
-import qualified Data.Vault.Lazy                    as Lazy
 import           System.IO.Unsafe
 
 import qualified Reactive.Banana.Prim.Dependencies as Deps
@@ -28,9 +26,9 @@ import           Reactive.Banana.Prim.Util
 -- | Make 'Pulse' from evaluation function
 newPulse :: String -> PulseFunction a -> Build (Pulse a)
 newPulse name eval = liftIO $ do
-    key <- Lazy.newKey
+    value <- newIORef Nothing
     newRef $ Pulse
-        { _keyP      = key
+        { _valueP      = value
         , _seenP     = agesAgo
         , _evalP     = eval
         , _childrenP = []
@@ -52,9 +50,9 @@ this is a recipe for desaster.
 -- | 'Pulse' that never fires.
 neverP :: Build (Pulse a)
 neverP = liftIO $ do
-    key <- Lazy.newKey
+    value <- newIORef Nothing
     newRef $ Pulse
-        { _keyP      = key
+        { _valueP      = value
         , _seenP     = agesAgo
         , _evalP     = PulseNever
         , _childrenP = []
@@ -224,31 +222,29 @@ getValueL latch = do
 {-----------------------------------------------------------------------------
     EvalP monad
 ------------------------------------------------------------------------------}
-runEvalP :: Lazy.Vault -> EvalP a -> Build (a, EvalPW)
-runEvalP s1 m = RW.readerWriterIOT $ \r2 -> do
-    (a,_,(w1,w2)) <- RWS.runRWSIOT m r2 s1
+runEvalP :: EvalP a -> Build (a, EvalPW)
+runEvalP m = RW.readerWriterIOT $ \r2 -> do
+    (a,(w1,w2)) <- RW.runReaderWriterIOT m r2
     return ((a,w1), w2)
 {-# INLINE runEvalP #-}
 
 liftBuildP :: Build a -> EvalP a
-liftBuildP m = RWS.rwsT $ \r2 s -> do
+liftBuildP m = RW.readerWriterIOT $ \r2 -> do
     (a,w2) <- RW.runReaderWriterIOT m r2
-    return (a,s,(mempty,w2))
+    return (a,(mempty,w2))
 
 askTime :: EvalP Time
-askTime = fst <$> RWS.ask
+askTime = fst <$> RW.ask
 {-# INLINE askTime #-}
 
 readPulseP :: Pulse a -> EvalP (Maybe a)
 readPulseP p = do
     Pulse{..} <- readRef p
-    join . Lazy.lookup _keyP <$> RWS.get
+    liftIO (readIORef _valueP)
 {-# INLINE readPulseP #-}
 
-writePulseP :: Lazy.Key (Maybe a) -> Maybe a -> EvalP ()
-writePulseP key a = do
-    s <- RWS.get
-    RWS.put $ Lazy.insert key a s
+writePulseP :: IORef (Maybe a) -> Maybe a -> EvalP ()
+writePulseP key a = liftIO (writeIORef key a)
 {-# INLINE writePulseP #-}
 
 readLatchP :: Latch a -> EvalP a
@@ -260,15 +256,15 @@ readLatchFutureP = return . readLatchIO
 {-# INLINE readLatchFutureP #-}
 
 rememberLatchUpdate :: IO () -> EvalP ()
-rememberLatchUpdate x = RWS.tell ((Action x,mempty),mempty)
+rememberLatchUpdate x = RW.tell ((Action x,mempty),mempty)
 {-# INLINE rememberLatchUpdate #-}
 
 rememberOutput :: (Output, EvalO) -> EvalP ()
-rememberOutput x = RWS.tell ((mempty,[x]),mempty)
+rememberOutput x = RW.tell ((mempty,[x]),mempty)
 {-# INLINE rememberOutput #-}
 
 -- worker wrapper to break sharing and support better inlining
-unwrapEvalP r m = RWS.run m r
+unwrapEvalP r w m = RW.run m r w
 {-# INLINE unwrapEvalP #-}
-wrapEvalP   m   = RWS.R m
+wrapEvalP   m   = RW.ReaderWriterIOT m
 {-# INLINE wrapEvalP #-}

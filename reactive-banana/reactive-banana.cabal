@@ -60,7 +60,6 @@ Library
 
     other-modules:
                         Control.Monad.Trans.ReaderWriterIO,
-                        Control.Monad.Trans.RWSIO,
                         Reactive.Banana.Internal.Combinators,
                         Reactive.Banana.Prim.Combinators,
                         Reactive.Banana.Prim.Compile,

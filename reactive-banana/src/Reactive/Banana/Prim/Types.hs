@@ -6,13 +6,12 @@
 {-# LANGUAGE GADTs #-}
 module Reactive.Banana.Prim.Types where
 
-import           Control.Monad.Trans.RWSIO
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.ReaderWriterIO
 import           Data.Functor
 import           Data.Hashable
+import           Data.IORef
 import           Data.Monoid
-import qualified Data.Vault.Lazy                    as Lazy
 import           System.IO.Unsafe
 import           System.Mem.Weak
 
@@ -30,7 +29,7 @@ data Network = Network
     , nAlwaysP        :: !(Maybe (Pulse ()))   -- Pulse that always fires.
     }
 
-type Inputs        = ([SomeNode], Lazy.Vault)
+type Inputs        = [SomeNode]
 type EvalNetwork a = Network -> IO (a, Network)
 type Step          = EvalNetwork (IO ())
 
@@ -85,7 +84,7 @@ update (Lens get set) f = \s -> set (f $ get s) s
 ------------------------------------------------------------------------------}
 type Pulse  a = Ref (Pulse' a)
 data Pulse' a = Pulse
-    { _keyP      :: !(Lazy.Key (Maybe a)) -- Key to retrieve pulse from cache.
+    { _valueP    :: !(IORef (Maybe a))  -- Key to retrieve pulse from cache.
     , _seenP     :: !Time                 -- See note [Timestamp].
     , _evalP     :: PulseFunction a       -- Calculate current value.
     , _childrenP :: [Weak SomeNode]       -- Weak references to child nodes.
@@ -169,7 +168,7 @@ type Future   = IO
 
 -- Note: For efficiency reasons, we unroll the monad transformer stack.
 -- type EvalP = RWST () Lazy.Vault EvalPW Build
-type EvalP    = RWSIOT BuildR (EvalPW,BuildW) Lazy.Vault
+type EvalP    = ReaderWriterIOT BuildR (EvalPW,BuildW)
     -- writer : (latch updates, IO action)
     -- state  : current pulse values
 
