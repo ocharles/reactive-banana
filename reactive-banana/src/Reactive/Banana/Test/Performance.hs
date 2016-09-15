@@ -4,7 +4,7 @@
     Performance tests
 ------------------------------------------------------------------------------}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Reactive.Banana.Test.Performance where
+module Main where
 
 import           Control.DeepSeq
 import           Control.Exception                  (evaluate)
@@ -45,12 +45,12 @@ benchmark netsize duration = measureTwo phase1 phase2
         (handlers, triggers) <- unzip <$> replicateM netsize newAddHandler
         (clock   , trigger ) <- newAddHandler
             
-        let networkD :: forall t. Frameworks t => Moment t ()
+        let networkD :: MomentIO ()
             networkD = do
                 es <- mapM fromAddHandler handlers
                 e  <- fromAddHandler clock
-                let countBs = map count es
-                trimmedBs <- mapM trimB countBs
+                countBs <- mapM count es
+                --trimmedBs <- mapM trimB countBs
                 
                 {-
                 let step10E     = filterE (\cnt -> cnt `rem` 10 == 0) e
@@ -58,10 +58,10 @@ benchmark netsize duration = measureTwo phase1 phase2
                 let selectedB   = switchB (head countBs) selectedB_E
                 let outputE     = (doSomething . show <$> selectedB) <@ step10E
                 -}
-                let outputE = doSomething (show . length $ trimmedBs) <$ e
+                let outputE = doSomething (show . length $ countBs) <$ e
                 reactimate $ outputE
 
-            count :: Event t () -> Behavior t Int
+            count :: Event () -> MomentIO (Behavior Int)
             count e = accumB 0 $ (+1) <$ e
         
         network <- compile networkD

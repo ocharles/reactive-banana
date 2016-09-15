@@ -86,3 +86,12 @@ Test-Suite tests
                         test-framework-hunit >= 0.2 && < 0.4,
                         reactive-banana, vault, containers, transformers,
                         unordered-containers, hashable, psqueues, pqueue
+
+Benchmark john-lato
+  default-language: Haskell98
+  hs-source-dirs: src
+  main-is: Reactive/Banana/Test/Performance.hs
+  build-depends: criterion, base, containers, transformers, unordered-containers, hashable, vault, pqueue, deepseq, mwc-random, time
+  type: exitcode-stdio-1.0
+  ghc-prof-options: -auto-all
+  ghc-options: -O2
