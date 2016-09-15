@@ -75,6 +75,9 @@ Library
                         Reactive.Banana.Prim.Util,
                         Reactive.Banana.Types
 
+  ghc-prof-options: -auto-all
+  ghc-options: -O2
+
 Test-Suite tests
     default-language:   Haskell98
     type:               exitcode-stdio-1.0

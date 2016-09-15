@@ -28,7 +28,7 @@ compile m state1 = do
     theAlwaysP <- case nAlwaysP state1 of
         Just x   -> return x
         Nothing  -> do
-            (x,_,_) <- runBuildIO undefined $ newPulse "alwaysP" (return $ Just ())
+            (x,_,_) <- runBuildIO undefined $ newPulse "alwaysP" (PulseConst ())
             return x
 
     (a, topology, os) <- runBuildIO (nTime state1, theAlwaysP) m

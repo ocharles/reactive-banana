@@ -31,7 +31,7 @@ newInput = mdo
     pulse  <- liftIO $ newRef $ Pulse
         { _keyP      = key
         , _seenP     = agesAgo
-        , _evalP     = readPulseP pulse    -- get its own value
+        , _evalP     = PulseRead pulse    -- get its own value
         , _childrenP = []
         , _parentsP  = []
         , _levelP    = ground

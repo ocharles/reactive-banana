@@ -1,7 +1,7 @@
 {-----------------------------------------------------------------------------
     reactive-banana
 ------------------------------------------------------------------------------}
-{-# LANGUAGE RecordWildCards, BangPatterns #-}
+{-# LANGUAGE RecordWildCards, BangPatterns, GADTs #-}
 module Reactive.Banana.Prim.Evaluation (
     step
     ) where
@@ -78,7 +78,7 @@ evaluatePulses roots = wrapEvalP $ \r -> go r =<< insertNodes r roots Q.empty
 evaluateNode :: SomeNode -> EvalP [SomeNode]
 evaluateNode (P p) = {-# SCC evaluateNodeP #-} do
     Pulse{..} <- readRef p
-    ma        <- _evalP
+    ma        <- runPulseFunction _evalP
     writePulseP _keyP ma
     case ma of
         Nothing -> return []
@@ -102,6 +102,40 @@ evaluateNode (O o) = {-# SCC evaluateNodeO #-} do
     m          <- _evalO                    -- calculate output action
     rememberOutput $ (o,m)
     return []
+
+runPulseFunction :: PulseFunction a -> EvalP (Maybe a)
+runPulseFunction (PulseConst a) = return (Just a)
+runPulseFunction (PulseMap f p) = {-# SCC pulseMap #-} fmap f <$> readPulseP p
+runPulseFunction (PulseTagLatch x p1) =
+  {-# SCC pulseTagLatch #-}
+  fmap . const <$> readLatchFutureP x <*> readPulseP p1
+runPulseFunction (PulseFilter p1) = {-# SCC pulseFilter #-} join <$> readPulseP p1
+runPulseFunction (PulseMapIO f p1) =
+  {-# SCC pulseMapIO #-} eval =<< readPulseP p1
+  where
+    eval (Just x) = Just <$> liftIO (f x)
+    eval Nothing  = return Nothing
+runPulseFunction (PulseUnionWith f px py) =
+  {-# SCC pulseUnionWith #-} eval <$> readPulseP px <*> readPulseP py
+  where
+    eval (Just x) (Just y) = Just (f x y)
+    eval (Just x) Nothing  = Just x
+    eval Nothing  (Just y) = Just y
+    eval Nothing  Nothing  = Nothing
+runPulseFunction (PulseApply f x) = {-# SCC pulseApply #-} fmap <$> readLatchP f <*> readPulseP x
+runPulseFunction (PulseExecute p1 b) =
+  {-# SCC executeP #-} eval =<< readPulseP p1
+  where
+    eval (Just x) = Just <$> liftBuildP (x b)
+    eval Nothing  = return Nothing
+runPulseFunction (PulseJoinLatch lp) = readPulseP =<< readLatchP lp
+runPulseFunction (PulseSwitch pp p2) = do
+  mnew <- readPulseP pp
+  case mnew of
+    Nothing -> return ()
+    Just new -> liftBuildP $ p2 `changeParent` new
+  return Nothing
+runPulseFunction (PulseRead p) = readPulseP p
 
 -- | Insert nodes into the queue
 -- insertNode :: [SomeNode] -> Queue SomeNode -> EvalP (Queue SomeNode)

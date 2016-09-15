@@ -26,7 +26,7 @@ import           Reactive.Banana.Prim.Util
     Build primitive pulses and latches
 ------------------------------------------------------------------------------}
 -- | Make 'Pulse' from evaluation function
-newPulse :: String -> EvalP (Maybe a) -> Build (Pulse a)
+newPulse :: String -> PulseFunction a -> Build (Pulse a)
 newPulse name eval = liftIO $ do
     key <- Lazy.newKey
     newRef $ Pulse
@@ -56,7 +56,7 @@ neverP = liftIO $ do
     newRef $ Pulse
         { _keyP      = key
         , _seenP     = agesAgo
-        , _evalP     = return Nothing
+        , _evalP     = PulseNever
         , _childrenP = []
         , _parentsP  = []
         , _levelP    = ground

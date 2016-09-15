@@ -3,6 +3,7 @@
 ------------------------------------------------------------------------------}
 {-# LANGUAGE ExistentialQuantification, NamedFieldPuns #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 module Reactive.Banana.Prim.Types where
 
 import           Control.Monad.Trans.RWSIO
@@ -84,17 +85,33 @@ update (Lens get set) f = \s -> set (f $ get s) s
 ------------------------------------------------------------------------------}
 type Pulse  a = Ref (Pulse' a)
 data Pulse' a = Pulse
-    { _keyP      :: Lazy.Key (Maybe a) -- Key to retrieve pulse from cache.
-    , _seenP     :: !Time              -- See note [Timestamp].
-    , _evalP     :: EvalP (Maybe a)    -- Calculate current value.
-    , _childrenP :: [Weak SomeNode]    -- Weak references to child nodes.
-    , _parentsP  :: [Weak SomeNode]    -- Weak reference to parent nodes.
-    , _levelP    :: !Level             -- Priority in evaluation order.
-    , _nameP     :: String             -- Name for debugging.
+    { _keyP      :: !(Lazy.Key (Maybe a)) -- Key to retrieve pulse from cache.
+    , _seenP     :: !Time                 -- See note [Timestamp].
+    , _evalP     :: PulseFunction a       -- Calculate current value.
+    , _childrenP :: [Weak SomeNode]       -- Weak references to child nodes.
+    , _parentsP  :: [Weak SomeNode]       -- Weak reference to parent nodes.
+    , _levelP    :: !Level                -- Priority in evaluation order.
+    , _nameP     :: String                -- Name for debugging.
     }
 
 instance Show (Pulse a) where
     show p = _nameP (unsafePerformIO $ readRef p) ++ " " ++ show (hashWithSalt 0 p)
+
+-- | What is the function of this Pulse? What should it do when we evaluate
+-- it?
+data PulseFunction a where
+  PulseMap :: (a -> b) -> Pulse a -> PulseFunction b
+  PulseNever :: PulseFunction a
+  PulseConst :: a -> PulseFunction a
+  PulseTagLatch :: Latch a -> Pulse b -> PulseFunction (Future a)
+  PulseFilter :: Pulse (Maybe a) -> PulseFunction a
+  PulseMapIO :: (a -> IO b) -> Pulse a -> PulseFunction b
+  PulseUnionWith :: (a -> a -> a) -> Pulse a -> Pulse a -> PulseFunction a
+  PulseApply :: Latch (a -> b) -> Pulse a -> PulseFunction b
+  PulseExecute :: Pulse (a -> Build b) -> a -> PulseFunction b
+  PulseJoinLatch :: Latch (Pulse a) -> PulseFunction a
+  PulseSwitch :: Pulse (Pulse a) -> Pulse a -> PulseFunction a
+  PulseRead :: Pulse a -> PulseFunction a
 
 type Latch  a = Ref (Latch' a)
 data Latch' a = Latch

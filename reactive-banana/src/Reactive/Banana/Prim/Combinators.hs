@@ -15,7 +15,7 @@ import Reactive.Banana.Prim.Plumbing
     , readPulseP, readLatchP, readLatchFutureP, liftBuildP,
     )
 import qualified Reactive.Banana.Prim.Plumbing (pureL)
-import           Reactive.Banana.Prim.Types    (Latch, Future, Pulse, Build)
+import           Reactive.Banana.Prim.Types    (Latch, Future, Pulse, Build, PulseFunction(..))
 
 import Debug.Trace
 -- debug s = trace s
@@ -26,7 +26,7 @@ debug s = id
 ------------------------------------------------------------------------------}
 mapP :: (a -> b) -> Pulse a -> Build (Pulse b)
 mapP f p1 = do
-    p2 <- newPulse "mapP" $ {-# SCC mapP #-} fmap f <$> readPulseP p1
+    p2 <- newPulse "mapP" (PulseMap f p1)
     p2 `dependOn` p1
     return p2
 
@@ -36,45 +36,34 @@ mapP f p1 = do
 -- of a 'Latch' to a pulse.
 tagFuture :: Latch a -> Pulse b -> Build (Pulse (Future a))
 tagFuture x p1 = do
-    p2 <- newPulse "tagFuture" $
-        fmap . const <$> readLatchFutureP x <*> readPulseP p1
+    p2 <- newPulse "tagFuture" (PulseTagLatch x p1)
     p2 `dependOn` p1
     return p2
 
 filterJustP :: Pulse (Maybe a) -> Build (Pulse a)
 filterJustP p1 = do
-    p2 <- newPulse "filterJustP" $ {-# SCC filterJustP #-} join <$> readPulseP p1
+    p2 <- newPulse "filterJustP" (PulseFilter p1)
     p2 `dependOn` p1
     return p2
 
 unsafeMapIOP :: (a -> IO b) -> Pulse a -> Build (Pulse b)
 unsafeMapIOP f p1 = do
-        p2 <- newPulse "unsafeMapIOP" $
-            {-# SCC unsafeMapIOP #-} eval =<< readPulseP p1
+        p2 <- newPulse "unsafeMapIOP" (PulseMapIO f p1)
+
         p2 `dependOn` p1
         return p2
-    where
-    eval (Just x) = Just <$> liftIO (f x)
-    eval Nothing  = return Nothing
 
 unionWithP :: (a -> a -> a) -> Pulse a -> Pulse a -> Build (Pulse a)
 unionWithP f px py = do
-        p <- newPulse "unionWithP" $
-            {-# SCC unionWithP #-} eval <$> readPulseP px <*> readPulseP py
+        p <- newPulse "unionWithP" (PulseUnionWith f px py)
         p `dependOn` px
         p `dependOn` py
         return p
-    where
-    eval (Just x) (Just y) = Just (f x y)
-    eval (Just x) Nothing  = Just x
-    eval Nothing  (Just y) = Just y
-    eval Nothing  Nothing  = Nothing
 
 -- See note [LatchRecursion]
 applyP :: Latch (a -> b) -> Pulse a -> Build (Pulse b)
 applyP f x = do
-    p <- newPulse "applyP" $
-        {-# SCC applyP #-} fmap <$> readLatchP f <*> readPulseP x
+    p <- newPulse "applyP" (PulseApply f x)
     p `dependOn` x
     return p
 
@@ -113,30 +102,16 @@ switchL l pl = mdo
 
 executeP :: Pulse (b -> Build a) -> b -> Build (Pulse a)
 executeP p1 b = do
-        p2 <- newPulse "executeP" $ {-# SCC executeP #-} eval =<< readPulseP p1
+        p2 <- newPulse "executeP" (PulseExecute p1 b)
         p2 `dependOn` p1
         return p2
-    where
-    eval (Just x) = Just <$> liftBuildP (x b)
-    eval Nothing  = return Nothing
 
 switchP :: Pulse (Pulse a) -> Build (Pulse a)
 switchP pp = mdo
     never <- neverP
     lp    <- stepperL never pp
-    let
-        -- switch to a new parent
-        switch = do
-            mnew <- readPulseP pp
-            case mnew of
-                Nothing  -> return ()
-                Just new -> liftBuildP $ p2 `changeParent` new
-            return Nothing
-        -- fetch value from old parent
-        eval = readPulseP =<< readLatchP lp
-    
-    p1 <- newPulse "switchP_in" switch :: Build (Pulse ())
+    p1 <- newPulse "switchP_in" (PulseSwitch pp p2)
     p1 `dependOn` pp
-    p2 <- newPulse "switchP_out" eval
+    p2 <- newPulse "switchP_out" (PulseJoinLatch lp)
     p2 `keepAlive` p1
     return p2
