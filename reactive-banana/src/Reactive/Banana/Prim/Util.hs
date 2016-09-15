@@ -81,3 +81,8 @@ mkWeakRefValue (Ref ref _) v = liftIO $ mkWeakIORefValue ref v
 deRefWeaks :: [Weak v] -> IO [v]
 deRefWeaks ws = {-# SCC deRefWeaks #-} fmap catMaybes $ mapM deRefWeak ws
 {-# INLINE deRefWeaks #-}
+
+forRefWeaks_ :: [Weak v] -> (v -> IO ()) -> IO ()
+forRefWeaks_ ws io =
+  mapM_ (deRefWeak >=> maybe (return ()) io) ws
+{-# INLINE forRefWeaks_ #-}

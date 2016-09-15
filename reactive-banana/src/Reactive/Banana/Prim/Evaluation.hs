@@ -6,6 +6,7 @@ module Reactive.Banana.Prim.Evaluation (
     step
     ) where
 
+import Data.Foldable (for_, traverse_)
 import qualified Control.Exception                  as Strict (evaluate)
 import           Control.Monad                                (foldM)
 import           Control.Monad                                (join)
@@ -41,7 +42,7 @@ step inputs
     ((_, (latchUpdates, outputs)), topologyUpdates, os)
             <- runBuildIO (time1, alwaysP)
             $  runEvalP
-            $  evaluatePulses inputs
+            $  RW.ReaderWriterIOT (\r w -> evaluatePulses r w inputs)
 
     doit latchUpdates                           -- update latch values from pulses
     doit topologyUpdates                        -- rearrange graph topology
@@ -60,85 +61,100 @@ runEvalOs = sequence_ . map join
     Traversal in dependency order
 ------------------------------------------------------------------------------}
 -- | Update all pulses in the graph, starting from a given set of nodes
-evaluatePulses :: [SomeNode] -> EvalP ()
-evaluatePulses roots = do
-  fin <- liftIO $ newIORef (return ())
-  wrapEvalP $ \r@(time, _) w -> go fin r w =<< insertNodes time roots Q.empty
-  liftIO $ join (readIORef fin)
+--evaluatePulses :: [SomeNode] -> IO ()
+evaluatePulses r@(time,_) w roots = do
+  fin <- newIORef (return ())
+  go fin r w =<< insertNodes time roots Q.empty
+  join (readIORef fin)
     where
     -- go :: Queue SomeNode -> EvalP ()
     go fin r@(time,_) w q = {-# SCC go #-}
         case ({-# SCC minView #-} Q.minView q) of
             Nothing         -> return ()
             Just (node, q)  -> do
-                children <- unwrapEvalP r w (evaluateNode fin node)
+                children <- evaluateNode fin r w node
                 q        <- insertNodes time children q
                 go fin r w q
 
 -- | Recalculate a given node and return all children nodes
 -- that need to evaluated subsequently.
-evaluateNode :: IORef (IO ()) -> SomeNode -> EvalP [SomeNode]
-evaluateNode cleanup (P p) = {-# SCC evaluateNodeP #-} do
+--evaluateNode :: IORef (IO ()) -> SomeNode -> EvalP [SomeNode]
+evaluateNode cleanup r w (P p) = {-# SCC evaluateNodeP #-} do
     Pulse{..} <- readRef p
-    ma        <- runPulseFunction _evalP
+    ma        <- runPulseFunction r w _evalP
     writePulseP _valueP ma
-    liftIO $ modifyIORef cleanup (writeIORef _valueP Nothing >>)
+    modifyIORef cleanup (writeIORef _valueP Nothing >>)
     case ma of
         Nothing -> return []
         Just _  -> liftIO $ deRefWeaks _childrenP
-evaluateNode _ (L lw) = {-# SCC evaluateNodeL #-} do
-    time           <- askTime
+evaluateNode _ r@(time,_) w (L lw) = {-# SCC evaluateNodeL #-} do
     LatchWrite{..} <- readRef lw
-    mlatch         <- liftIO $ deRefWeak _latchLW -- retrieve destination latch
+    mlatch         <- deRefWeak _latchLW -- retrieve destination latch
     case mlatch of
         Nothing    -> return ()
-        Just latch -> do
+        Just latch -> RW.run (do
             a <- _evalLW                    -- calculate new latch value
             -- liftIO $ Strict.evaluate a      -- see Note [LatchStrictness]
             rememberLatchUpdate $           -- schedule value to be set later
                 modify' latch $ \l ->
-                    a `seq` l { _seenL = time, _valueL = a }
+                    a `seq` l { _seenL = time, _valueL = a }) r w
     return []
-evaluateNode _ (O o) = {-# SCC evaluateNodeO #-} do
+evaluateNode _ r w (O o) = {-# SCC evaluateNodeO #-} do
     debug "evaluateNode O"
     Output{..} <- readRef o
-    m          <- _evalO                    -- calculate output action
-    rememberOutput $ (o,m)
+    m <- maybe (return $ debug "nop") id <$> readPulseP _evalO
+    RW.run (rememberOutput (o,m))
+           r w
     return []
 
-runPulseFunction :: PulseFunction a -> EvalP (Maybe a)
-runPulseFunction (PulseConst a) = return (Just a)
-runPulseFunction (PulseMap f p) = {-# SCC pulseMap #-} fmap f <$> readPulseP p
-runPulseFunction (PulseTagLatch x p1) =
-  {-# SCC pulseTagLatch #-}
-  fmap . const <$> readLatchFutureP x <*> readPulseP p1
-runPulseFunction (PulseFilter p1) = {-# SCC pulseFilter #-} join <$> readPulseP p1
-runPulseFunction (PulseMapIO f p1) =
-  {-# SCC pulseMapIO #-} eval =<< readPulseP p1
-  where
-    eval (Just x) = Just <$> liftIO (f x)
-    eval Nothing  = return Nothing
-runPulseFunction (PulseUnionWith f px py) =
-  {-# SCC pulseUnionWith #-} eval <$> readPulseP px <*> readPulseP py
-  where
-    eval (Just x) (Just y) = Just (f x y)
-    eval (Just x) Nothing  = Just x
-    eval Nothing  (Just y) = Just y
-    eval Nothing  Nothing  = Nothing
-runPulseFunction (PulseApply f x) = {-# SCC pulseApply #-} fmap <$> readLatchP f <*> readPulseP x
-runPulseFunction (PulseExecute p1 b) =
-  {-# SCC executeP #-} eval =<< readPulseP p1
-  where
-    eval (Just x) = Just <$> liftBuildP (x b)
-    eval Nothing  = return Nothing
-runPulseFunction (PulseJoinLatch lp) = readPulseP =<< readLatchP lp
-runPulseFunction (PulseSwitch pp p2) = do
-  mnew <- readPulseP pp
-  case mnew of
-    Nothing -> return ()
-    Just new -> liftBuildP $ p2 `changeParent` new
-  return Nothing
-runPulseFunction (PulseRead p) = readPulseP p
+--runPulseFunction :: PulseFunction a -> EvalP (Maybe a)
+runPulseFunction r w f =
+  case f of
+    PulseConst a ->
+      return (Just a)
+
+    PulseMap f p ->
+      {-# SCC pulseMap #-} fmap f <$> readPulseP p
+
+    PulseTagLatch x p1 ->
+      {-# SCC pulseTagLatch #-}
+      fmap . const <$> readLatchFutureP x <*> readPulseP p1
+
+    PulseFilter p1 ->
+      {-# SCC pulseFilter #-} join <$> readPulseP p1
+
+    PulseMapIO f p1 ->
+      let eval (Just x) = Just <$> liftIO (f x)
+          eval Nothing  = return Nothing
+      in {-# SCC pulseMapIO #-} eval =<< readPulseP p1
+
+    PulseUnionWith f px py ->
+      let eval (Just x) (Just y) = Just (f x y)
+          eval (Just x) Nothing  = Just x
+          eval Nothing  (Just y) = Just y
+          eval Nothing  Nothing  = Nothing
+      in {-# SCC pulseUnionWith #-} eval <$> readPulseP px <*> readPulseP py
+
+    PulseApply f x ->
+      {-# SCC pulseApply #-} fmap <$> readLatchIO f <*> readPulseP x
+
+    PulseExecute p1 b ->
+      let eval (Just x) = Just <$> RW.run (liftBuildP (x b)) r w
+          eval Nothing  = return Nothing
+      in {-# SCC executeP #-} eval =<< readPulseP p1
+
+    PulseJoinLatch lp ->
+      readPulseP =<< readLatchIO lp
+
+    PulseSwitch pp p2 -> do
+      mnew <- readPulseP pp
+      case mnew of
+        Nothing -> return ()
+        Just new -> RW.run (liftBuildP $ p2 `changeParent` new) r w
+      return Nothing
+
+    PulseRead p ->
+      readPulseP p
 
 -- | Insert nodes into the queue
 -- insertNode :: [SomeNode] -> Queue SomeNode -> EvalP (Queue SomeNode)

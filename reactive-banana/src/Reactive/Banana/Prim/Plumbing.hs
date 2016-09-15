@@ -120,7 +120,7 @@ cachedLatch eval = unsafePerformIO $ mdo
 addOutput :: Pulse EvalO -> Build ()
 addOutput p = do
     o <- liftIO $ newRef $ Output
-        { _evalO = maybe (return $ debug "nop") id <$> readPulseP p
+        { _evalO = p
         }
     (P p) `addChild` (O o)
     RW.tell $ BuildW (mempty, [o], mempty, mempty)
@@ -237,13 +237,13 @@ askTime :: EvalP Time
 askTime = fst <$> RW.ask
 {-# INLINE askTime #-}
 
-readPulseP :: Pulse a -> EvalP (Maybe a)
+--readPulseP :: Pulse a -> EvalP (Maybe a)
 readPulseP p = do
     Pulse{..} <- readRef p
     liftIO (readIORef _valueP)
 {-# INLINE readPulseP #-}
 
-writePulseP :: IORef (Maybe a) -> Maybe a -> EvalP ()
+--writePulseP :: IORef (Maybe a) -> Maybe a -> EvalP ()
 writePulseP key a = liftIO (writeIORef key a)
 {-# INLINE writePulseP #-}
 
@@ -251,7 +251,7 @@ readLatchP :: Latch a -> EvalP a
 readLatchP = liftBuildP . readLatchB
 {-# INLINE readLatchP #-}
 
-readLatchFutureP :: Latch a -> EvalP (Future a)
+readLatchFutureP :: Monad m => Latch a -> m (Future a)
 readLatchFutureP = return . readLatchIO
 {-# INLINE readLatchFutureP #-}
 

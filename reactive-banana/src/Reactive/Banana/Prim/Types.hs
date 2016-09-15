@@ -126,7 +126,7 @@ data LatchWrite' = forall a. LatchWrite
 
 type Output  = Ref Output'
 data Output' = Output
-    { _evalO     :: EvalP EvalO
+    { _evalO     :: Pulse EvalO
     }
 instance Eq Output where (==) = equalRef
 
