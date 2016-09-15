@@ -64,17 +64,8 @@ runEvalOs = sequence_ . map join
 --evaluatePulses :: [SomeNode] -> IO ()
 evaluatePulses r@(time,_) w roots = do
   fin <- newIORef (return ())
-  go fin r w =<< insertNodes time roots Q.empty
+  for_ roots (evaluateNode fin r w)
   join (readIORef fin)
-    where
-    -- go :: Queue SomeNode -> EvalP ()
-    go fin r@(time,_) w q = {-# SCC go #-}
-        case ({-# SCC minView #-} Q.minView q) of
-            Nothing         -> return ()
-            Just (node, q)  -> do
-                children <- evaluateNode fin r w node
-                q        <- insertNodes time children q
-                go fin r w q
 
 -- | Recalculate a given node and return all children nodes
 -- that need to evaluated subsequently.
@@ -85,8 +76,8 @@ evaluateNode cleanup r w (P p) = {-# SCC evaluateNodeP #-} do
     writePulseP _valueP ma
     modifyIORef cleanup (writeIORef _valueP Nothing >>)
     case ma of
-        Nothing -> return []
-        Just _  -> liftIO $ deRefWeaks _childrenP
+        Nothing -> return ()
+        Just _  -> forRefWeaks_ _childrenP (evaluateNode cleanup r w)
 evaluateNode _ r@(time,_) w (L lw) = {-# SCC evaluateNodeL #-} do
     LatchWrite{..} <- readRef lw
     mlatch         <- deRefWeak _latchLW -- retrieve destination latch
@@ -98,14 +89,13 @@ evaluateNode _ r@(time,_) w (L lw) = {-# SCC evaluateNodeL #-} do
             rememberLatchUpdate $           -- schedule value to be set later
                 modify' latch $ \l ->
                     a `seq` l { _seenL = time, _valueL = a }) r w
-    return []
+    return ()
 evaluateNode _ r w (O o) = {-# SCC evaluateNodeO #-} do
     debug "evaluateNode O"
     Output{..} <- readRef o
     m <- maybe (return $ debug "nop") id <$> readPulseP _evalO
-    RW.run (rememberOutput (o,m))
-           r w
-    return []
+    RW.run (rememberOutput (o,m)) r w
+    return ()
 
 --runPulseFunction :: PulseFunction a -> EvalP (Maybe a)
 runPulseFunction r w f =
@@ -155,19 +145,3 @@ runPulseFunction r w f =
 
     PulseRead p ->
       readPulseP p
-
--- | Insert nodes into the queue
--- insertNode :: [SomeNode] -> Queue SomeNode -> EvalP (Queue SomeNode)
-insertNodes time = {-# SCC insertNodes #-} go
-    where
-    go []              q = return q
-    go (node@(P p):xs) q = do
-        Pulse{..} <- readRef p
-        if time <= _seenP
-            then go xs q        -- pulse has already been put into the queue once
-            else do             -- pulse needs to be scheduled for evaluation
-                put p $! (let p = Pulse{..} in p { _seenP = time })
-                go xs (Q.insert _levelP node q)
-    go (node:xs)      q = go xs (Q.insert ground node q)
-            -- O and L nodes have only one parent, so
-            -- we can insert them at an arbitrary level
